@@ -34,9 +34,16 @@ func (p *Parser) advance(tType token.Type) {
 	if tType == p.curToken.Type {
 		p.nextToken()
 	} else {
-		msg := fmt.Sprintf("Couldn't match the token: %s because %s was found.", tType, p.curToken.Literal)
+		msg := fmt.Sprintf("Couldn't match the token: %s because %s was found.\n", tType, p.curToken.Literal)
 		p.Errors = append(p.Errors, msg)
 		// TODO: estabilizar el parser aquí...
+	}
+}
+
+// skipSemicolon
+func (p *Parser) skipSemicolon() {
+	if p.curToken.Type == token.SEMICOLON {
+		p.advance(token.SEMICOLON)
 	}
 }
 
@@ -48,6 +55,7 @@ func (p *Parser) Program() *ast.ProgramNode {
 
 	for p.curToken.Type != token.EOF {
 		resultExpr := p.statement()
+		p.skipSemicolon()
 		if resultExpr != nil {
 			programNode.Statements = append(programNode.Statements, resultExpr)
 		}
@@ -61,10 +69,11 @@ func (p *Parser) block() *ast.BlockStmtNode {
 	var blockStmt = &ast.BlockStmtNode{}
 	blockStmt.Statements = []ast.Statement{}
 
-	p.advance(token.RBRACE)
+	p.advance(token.LBRACE)
 
 	for p.curToken.Type != token.RBRACE {
 		resultExpr := p.statement()
+		p.skipSemicolon()
 		if resultExpr != nil {
 			blockStmt.Statements = append(blockStmt.Statements, resultExpr)
 		}
@@ -128,7 +137,7 @@ func (p *Parser) expression() ast.Expression {
 // logicOr ::= logicAnd ('||' logicAnd)*
 func (p *Parser) logicOr() ast.Expression {
 	node := p.logicAnd()
-	for p.curToken.Type != token.OR {
+	for p.curToken.Type == token.OR {
 		tok := p.curToken
 		p.advance(token.OR)
 		node = &ast.Binary{Left: node, Op: tok, Right: p.logicAnd()}
@@ -227,7 +236,7 @@ func (p *Parser) dot() ast.Expression {
 // call ::= primary ( '(' arguments ? ')' )
 func (p *Parser) call() ast.Expression {
 	node := p.primary()
-	for true {
+	for {
 		if p.curToken.Type == token.LPAREN || p.curToken.Type == token.LBRACKET {
 			node = p.callExpression(node)
 		} else {
@@ -243,7 +252,7 @@ func (p *Parser) primary() ast.Expression {
 	switch tok.Type {
 	case token.INT:
 		p.advance(token.INT)
-		value, _ := strconv.Atoi(tok.Literal)
+		value, _ := strconv.ParseInt(tok.Literal, 10, 64)
 		return &ast.IntegerNode{Value: value}
 	case token.STRING:
 		p.advance(token.STRING)
@@ -266,8 +275,15 @@ func (p *Parser) primary() ast.Expression {
 		return p.arrayLiteral()
 	case token.LBRACE:
 		return p.hashLiteral()
+	case token.IF:
+		return p.ifExpression()
+	case token.LPAREN:
+		p.advance(token.LPAREN)
+		expr := p.expression()
+		p.advance(token.RPAREN)
+		return expr
 	default:
-		msg := fmt.Sprintf("unknown token literal: %s", tok.Literal)
+		msg := fmt.Sprintf("unknown token literal: %s\n", tok.Literal)
 		p.Errors = append(p.Errors, msg)
 		return nil
 	}
@@ -278,12 +294,6 @@ func (p *Parser) callExpression(callee ast.Expression) ast.Expression {
 	var callExpr = &ast.CallExprNode{
 		Callee: callee,
 	}
-
-	/*
-	* pepe(10, 5);
-	* frutas[3];
-	* datos["nombre"];
-	 */
 
 	if p.curToken.Type == token.LPAREN {
 		p.advance(token.LPAREN)
@@ -296,7 +306,7 @@ func (p *Parser) callExpression(callee ast.Expression) ast.Expression {
 		if p.curToken.Type != token.RBRACKET {
 			callExpr.Arguments = p.arguments()
 			if len(callExpr.Arguments) > 1 {
-				msg := fmt.Sprintf("Invalid subcript reference.")
+				msg := fmt.Sprintf("Invalid subcript reference.\n")
 				p.Errors = append(p.Errors, msg)
 			}
 		}
@@ -311,9 +321,13 @@ func (p *Parser) functionLiteral() ast.Expression {
 	var functionNode = &ast.FunLiteralNode{}
 
 	p.advance(token.FUNCTION)
-	p.advance(token.LPAREN)
 
-	functionNode.Parameters = p.parameters()
+	p.advance(token.LPAREN)
+	if p.curToken.Type != token.RPAREN {
+		functionNode.Parameters = p.parameters()
+	}
+	p.advance(token.RPAREN)
+
 	functionNode.Body = p.block()
 
 	return functionNode
@@ -334,22 +348,62 @@ func (p *Parser) arrayLiteral() ast.Expression {
 
 // hashLiteral ::= '{' arguments? '}'
 func (p *Parser) hashLiteral() ast.Expression {
-	var hashLiteral = &ast.HashLiteralNode{Pairs: make(map[ast.Expression]ast.Expression)}
+	var hashLiteral = &ast.HashLiteralNode{}
 
 	p.advance(token.LBRACE)
 
-	if p.curToken.Type == token.RBRACE {
-
-		key := p.expression()
-		p.advance(token.COLON)
-		value := p.expression()
-
-		hashLiteral.Pairs[key] = value
+	if p.curToken.Type != token.RBRACE {
+		hashLiteral.Pairs = p.keyValuePairs()
 	}
 
 	p.advance(token.RBRACE)
 
 	return hashLiteral
+}
+
+// ifExpression
+func (p *Parser) ifExpression() ast.Expression {
+	var ifExpr = &ast.IfExprNode{}
+
+	p.advance(token.IF)
+
+	// condition
+	p.advance(token.LPAREN)
+	ifExpr.Condition = p.expression()
+	p.advance(token.RPAREN)
+
+	// consequence
+	ifExpr.Consequence = p.block()
+
+	// alternative
+	if p.curToken.Type == token.ELSE {
+		p.advance(token.ELSE)
+		ifExpr.Alternative = p.block()
+	}
+
+	return ifExpr
+}
+
+// keyValuePairs
+func (p *Parser) keyValuePairs() map[ast.Expression]ast.Expression {
+	var pairs = make(map[ast.Expression]ast.Expression)
+
+	// parse key -> value
+	key := p.expression()
+	p.advance(token.COLON)
+	value := p.expression()
+	pairs[key] = value
+
+	for p.curToken.Type == token.COMMA {
+		p.advance(token.COMMA)
+		// parse key -> value
+		key := p.expression()
+		p.advance(token.COLON)
+		value := p.expression()
+		pairs[key] = value
+	}
+
+	return pairs
 }
 
 // parameters ::= identifier (',' identifier)*
