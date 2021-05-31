@@ -90,6 +90,8 @@ func (p *Parser) statement() ast.Statement {
 		return p.letStmt()
 	case token.RETURN:
 		return p.returnStmt()
+	case token.WHILE:
+		return p.whileStmt()
 	default:
 		return p.expressionStmt()
 	}
@@ -118,6 +120,20 @@ func (p *Parser) returnStmt() ast.Statement {
 	returnStmt.Value = p.expression()
 
 	return returnStmt
+}
+
+// whileStmt
+func (p *Parser) whileStmt() ast.Statement {
+	var whileStmt = &ast.WhileStmtNode{}
+	p.advance(token.WHILE)
+
+	p.advance(token.LPAREN)
+	whileStmt.Condition = p.expression()
+	p.advance(token.RPAREN)
+
+	whileStmt.Body = p.block()
+
+	return whileStmt
 }
 
 // expressionStmt ::= expression

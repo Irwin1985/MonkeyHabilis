@@ -56,6 +56,7 @@ const (
 	IF       = "IF"
 	ELSE     = "ELSE"
 	RETURN   = "RETURN"
+	WHILE    = "WHILE"
 )
 
 // Diccionario con las palabras reservadas
@@ -67,6 +68,7 @@ var Keywords = map[string]Type{
 	"if":     IF,
 	"else":   ELSE,
 	"return": RETURN,
+	"while":  WHILE,
 }
 
 // ¿Este literal es una palabra reservada o un identificador?

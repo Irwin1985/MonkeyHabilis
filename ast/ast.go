@@ -32,6 +32,7 @@ const (
 	FUNCTION
 	LET
 	RETURN
+	WHILE
 	ARRAY
 	HASH
 	CALL
@@ -109,6 +110,29 @@ func (rs *ReturnStmtNode) statementNode() {}
 func (rs *ReturnStmtNode) Type() Type     { return RETURN }
 func (rs *ReturnStmtNode) String() string {
 	return fmt.Sprintf("return %s", rs.Value.String())
+}
+
+type WhileStmtNode struct {
+	Condition Expression
+	Body      *BlockStmtNode
+}
+
+func (ws *WhileStmtNode) statementNode() {}
+func (ws *WhileStmtNode) Type() Type     { return WHILE }
+func (ws *WhileStmtNode) String() string {
+	var out bytes.Buffer
+
+	out.WriteString("while")
+
+	// condition
+	out.WriteString("(")
+	out.WriteString(ws.Condition.String())
+	out.WriteString(")")
+
+	// while body
+	out.WriteString(ws.Body.String())
+
+	return out.String()
 }
 
 type ExpressionStmtNode struct {
