@@ -1,15 +1,54 @@
 package main
 
 import (
+	"MonkeyHabilis/compiler"
 	"MonkeyHabilis/lexer"
 	"MonkeyHabilis/parser"
 	"MonkeyHabilis/token"
+	"MonkeyHabilis/vm"
 	"fmt"
+	"os/user"
 )
 
 func main() {
 	// testLexer()
-	testParser()
+	//testParser()
+	user, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Hello %s! This is the Monkey Habilis programming language!\n", user.Username)
+	fmt.Printf("Feel free to type in commands\n")
+	testVirtualMachine()
+	//repl.Start(os.Stdin, os.Stdout)
+}
+
+func testVirtualMachine() {
+	input := "3 / 0"
+	l := lexer.New(input)
+	p := parser.New(l)
+
+	program := p.Program()
+	if len(p.Errors) != 0 {
+		fmt.Print("Errores encontrados\n")
+	}
+
+	comp := compiler.New()
+	err := comp.Compile(program)
+	if err != nil {
+		fmt.Printf("woops! Compilation failed:\n %s\n", err)
+	}
+
+	machine := vm.New(comp.Bytecode())
+	err = machine.Run()
+
+	if err != nil {
+		fmt.Printf("Woops! Executing bytecode failed:\n %s\n", err)
+	}
+
+	stackTop := machine.StackTop()
+	fmt.Print(stackTop.Inspect())
+	fmt.Print("\n")
 }
 
 func testParser() {
