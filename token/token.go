@@ -18,7 +18,6 @@ const (
 	IDENT  = "IDENT"
 	INT    = "INT"
 	STRING = "STRING"
-	NULL   = "NULL"
 
 	ASSIGN   = "ASSIGN"
 	PLUS     = "PLUS"
@@ -53,6 +52,7 @@ const (
 	LET      = "LET"
 	TRUE     = "TRUE"
 	FALSE    = "FALSE"
+	NULL     = "NULL"
 	IF       = "IF"
 	ELSE     = "ELSE"
 	RETURN   = "RETURN"
@@ -65,6 +65,7 @@ var Keywords = map[string]Type{
 	"let":    LET,
 	"true":   TRUE,
 	"false":  FALSE,
+	"null":   NULL,
 	"if":     IF,
 	"else":   ELSE,
 	"return": RETURN,

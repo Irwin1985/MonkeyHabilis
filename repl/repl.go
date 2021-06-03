@@ -14,10 +14,9 @@ const PROMPT = ">> "
 
 func Start(in io.Reader, out io.Writer) {
 	scanner := bufio.NewScanner(in)
-	//env := object.NewEnvironment()
 
 	for {
-		fmt.Printf(PROMPT)
+		fmt.Print(PROMPT)
 		scanned := scanner.Scan()
 		if !scanned {
 			return
@@ -39,7 +38,7 @@ func Start(in io.Reader, out io.Writer) {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
 		}
 
-		machine := vm.New(comp.Bytecode())
+		machine := vm.New(comp.GetByteCode())
 		err = machine.Run()
 
 		if err != nil {
