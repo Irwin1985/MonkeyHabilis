@@ -8,40 +8,99 @@ import (
 )
 
 var STACK_SIZE = 2048
+
+// estamos usando un int genérico por lo tanto este número es falso.
+var GLOBAL_SIZE = 65536
+var MAX_FRAMES = 1024
+
 var TRUE = &object.Boolean{Value: true}
 var FALSE = &object.Boolean{Value: false}
 var NULL = &object.Null{}
 
 type VM struct {
-	stack        []object.Object        // la pila de objetos
-	sp           int                    // este es el puntero de la pila que siempre apunta al último objeto
-	instructions []compiler.Instruction // la lista de instrucciones a ejecutar
-	objectPool   []object.Object        // la lista de literales constantes
+	objectPool  []object.Object // la lista de literales constantes
+	stack       []object.Object // la pila de objetos
+	sp          int             // este es el puntero de la pila que siempre apunta al último objeto
+	globals     []object.Object // array de variables globales
+	frames      []*Frame        // array de Frames
+	framesIndex int
 }
 
 // Crea la máquina virtual
 func New(bytecode *compiler.ByteCode) *VM {
-	vm := &VM{
-		stack:        make([]object.Object, STACK_SIZE),
-		sp:           0,
-		instructions: bytecode.Instructions,
-		objectPool:   bytecode.ObjectPool,
+	// Esta es digamos la función principal
+	// la máquina virtual creerá que siempre opera sobre frames
+	mainFunction := &object.CompiledFunction{
+		Instructions: bytecode.Instructions,
 	}
+
+	// Creamos el Frame principal
+	mainFrame := NewFrame(mainFunction)
+	// Creamos el array de frames
+	frames := make([]*Frame, MAX_FRAMES)
+	// Y le decimos que la posición 0 es el frame principal.
+	frames[0] = mainFrame
+
+	vm := &VM{
+		objectPool:  bytecode.ObjectPool,
+		stack:       make([]object.Object, STACK_SIZE),
+		sp:          0,
+		globals:     make([]object.Object, GLOBAL_SIZE),
+		frames:      frames,
+		framesIndex: 1,
+	}
+
 	return vm
+}
+
+// Crea la máquina virtual con la tabla de símbolos
+func NewWithGlobalsStore(bytecode *compiler.ByteCode, s []object.Object) *VM {
+	vm := New(bytecode)
+	vm.globals = s
+
+	return vm
+}
+
+// agrega un nuevo frame
+func (vm *VM) loadFrame(newFrame *Frame) {
+	// ampliamos el array de frames
+	vm.frames[vm.framesIndex] = newFrame
+	// incrementamos el contador de frames
+	vm.framesIndex += 1
+}
+
+// elimina el frame
+func (vm *VM) unloadFrame() *Frame {
+	// guardamos el frame actual
+	deletedFrame := vm.frames[vm.framesIndex]
+	// y lo eliminamos de la lista
+	vm.framesIndex -= 1
+
+	return deletedFrame
+}
+
+// devuelve el frame actual
+func (vm *VM) curFrame() *Frame {
+	return vm.frames[vm.framesIndex-1]
 }
 
 // Comienza el ciclo Fetch-Decode-Execute
 func (vm *VM) Run() error {
-	for ip := 0; ip < len(vm.instructions); ip++ {
-		// paso 1, obtener la instrucción a ejecutar
-		instruction := vm.instructions[ip]
+	for vm.curFrame().ip < len(vm.curFrame().cf.Instructions)-1 {
+		vm.curFrame().ip += 1
+		// Obtener la instrucción a ejecutar
+		instruction := vm.curFrame().cf.Instructions[vm.curFrame().ip]
+
 		switch instruction.OpCode {
 		case code.OpConstant:
 			// Agregar una constante a la pila, necesitamos su índice entonces
 			// lo tomamos de la lista de objetos y usamos el campo instruction.index
 			index := instruction.Position
 			obj := vm.objectPool[index]
-			vm.push(obj)
+			err := vm.push(obj)
+			if err != nil {
+				return err
+			}
 
 		case code.OpAdd, code.OpSub, code.OpMul, code.OpDiv, code.OpLess, code.OpLessEq, code.OpGreater, code.OpGreaterEq, code.OpEqual, code.OpNotEq, code.OpAnd, code.OpOr:
 			err := vm.executeBinaryOperation(instruction.OpCode)
@@ -61,17 +120,152 @@ func (vm *VM) Run() error {
 			}
 		case code.OpNull:
 			vm.push(NULL)
+
 		case code.OpJumpNotTrue:
 			// TODO: validar el tipo de dato antes.
 			if !vm.pop().(*object.Boolean).Value {
 				// saltamos a donde nos indique OpJumpNotTrue
-				ip = instruction.Position - 1 // le resto 1 para que comience exactamente en el número correcto.
+				vm.curFrame().ip = instruction.Position - 1 // le resto 1 para que comience exactamente en el número correcto.
 			}
 		case code.OpJump:
 			// saltamos sin preguntar al índice
-			ip = instruction.Position - 1
+			vm.curFrame().ip = instruction.Position - 1
+
 		case code.OpPop:
 			vm.pop()
+
+		case code.OpSetGlobal:
+			// obtenemos el índice que nos dió el compilador
+			globalIndex := instruction.Position
+			// y por supuesto lo enlazamos con el último elemento de la pila
+			// se supone que la sentencia LET lo ha mandado a meter antes en la pila.
+			vm.globals[globalIndex] = vm.pop()
+
+		case code.OpGetGlobal:
+			// obtenemos el índice del identificador
+			globalIndex := instruction.Position
+			// empujamos el objeto en la pila
+			err := vm.push(vm.globals[globalIndex])
+			if err != nil {
+				return err
+			}
+
+		case code.OpArray:
+			size := instruction.Position
+			arrayObj := &object.Array{
+				Elements: []object.Object{},
+			}
+
+			if size == 0 {
+				arrayObj.Elements = append(arrayObj.Elements, NULL)
+			} else {
+				for i := 0; i <= size; i++ {
+					arrayObj.Elements = append(arrayObj.Elements, vm.pop())
+				}
+			}
+			// agregamos el array
+			err := vm.push(arrayObj)
+			if err != nil {
+				return err
+			}
+
+		case code.OpHash:
+			size := instruction.Position // doble por que son tuplas (key->value)
+			// creamos el objeto hash
+			hashObj := &object.Hash{
+				Pairs: make(map[string]object.Object),
+			}
+			if size == 0 {
+				vm.push(NULL)
+			} else {
+				for i := 0; i <= size; i++ {
+					key := vm.pop().Inspect()
+					value := vm.pop()
+					hashObj.Pairs[key] = value
+				}
+			}
+			err := vm.push(hashObj)
+			if err != nil {
+				return err
+			}
+
+		case code.OpAccess:
+			// recuperamos el objeto que hace de índice
+			objIndex := vm.pop()
+
+			// obtenemos el objeto collection de la pila
+			objCollection := vm.pop()
+			// hacemos las validaciones
+			switch objCollection.Type() {
+			case object.ARRAY_OBJ:
+				// el objeto que sirve de índice debe ser numérico
+				if objIndex.Type() != object.INTEGER_OBJ {
+					return fmt.Errorf("invalid subscript data type for array access %s", objIndex.Type())
+				}
+				// convertimos y enviamos a la pila el elemento del array
+				arrayObj := objCollection.(*object.Array)
+				index := int(objIndex.(*object.Integer).Value)
+
+				if index < 0 || index > len(arrayObj.Elements) {
+					return fmt.Errorf("index out of range")
+				}
+
+				vm.push(arrayObj.Elements[index])
+
+			case object.HASH_OBJ:
+				// el objeto que sirve de índice debe ser string
+				if objIndex.Type() != object.STRING_OBJ {
+					return fmt.Errorf("invalid subscript data type for array access %s", objIndex.Type())
+				}
+				// convertimos y enviamos a la pila el elemento del diccionario
+				hashObj := objCollection.(*object.Hash)
+				key := objIndex.(*object.String).Value
+				if objValue, ok := hashObj.Pairs[key]; ok {
+					err := vm.push(objValue)
+					if err != nil {
+						return err
+					}
+				} else {
+					err := vm.push(NULL)
+					if err != nil {
+						return err
+					}
+				}
+			case object.STRING_OBJ:
+				// el objeto que sirve de índice debe ser numérico
+				if objIndex.Type() != object.INTEGER_OBJ {
+					return fmt.Errorf("invalid subscript data type for array access %s", objIndex.Type())
+				}
+				stringObj := objCollection.(*object.String)
+				index := int(objIndex.(*object.Integer).Value)
+
+				if index < 0 || index > len(stringObj.Value) {
+					return fmt.Errorf("index out of range")
+				}
+				// nuevo string truncado
+				newStrObj := &object.String{Value: string(stringObj.Value[index])}
+				vm.push(newStrObj)
+			}
+
+		case code.OpCall:
+			peekObj := vm.peek()
+			callee, ok := peekObj.(*object.CompiledFunction)
+			if !ok {
+				return fmt.Errorf("calling non-function")
+			}
+			frame := NewFrame(callee)
+			vm.loadFrame(frame)
+
+		case code.OpReturnValue:
+			returnValue := vm.pop() // obtiene el valor a retornar
+
+			vm.unloadFrame() // sube un frame
+			vm.pop()         // quita la función de la pila
+
+			err := vm.push(returnValue) // sube el valor a retornar por el frame anterior
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -104,6 +298,11 @@ func (vm *VM) StackTop() object.Object {
 
 func (vm *VM) LastPoppedStackElem() object.Object {
 	return vm.stack[vm.sp]
+}
+
+// Devuelve el último elemento sin removerlo de la pila
+func (vm *VM) peek() object.Object {
+	return vm.stack[vm.sp-1]
 }
 
 /*
@@ -200,6 +399,7 @@ func (vm *VM) executeBinaryInteger(left object.Object, op code.OpCode, right obj
 		} else {
 			vm.push(FALSE)
 		}
+
 	default:
 		return fmt.Errorf("unsupported operator for binary operation: %s %s", left.Type(), right.Type())
 	}

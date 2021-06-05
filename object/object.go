@@ -2,6 +2,7 @@ package object
 
 import (
 	"CornyLang/ast"
+	"MonkeyHabilis/code"
 	"bytes"
 	"fmt"
 	"hash/fnv"
@@ -13,20 +14,17 @@ type BuiltinFunction func(args ...Object) Object
 type ObjectType string
 
 const (
-	NULL_OBJ  = "NULL"
-	ERROR_OBJ = "ERROR"
-
-	INTEGER_OBJ = "INTEGER"
-	BOOLEAN_OBJ = "BOOLEAN"
-	STRING_OBJ  = "STRING"
-
-	RETURN_VALUE_OBJ = "RETURN_VALUE"
-
-	FUNCTION_OBJ = "FUNCTION"
-	BUILTIN_OBJ  = "BUILTIN"
-
-	ARRAY_OBJ = "ARRAY"
-	HASH_OBJ  = "HASH"
+	NULL_OBJ              = "NULL"
+	ERROR_OBJ             = "ERROR"
+	INTEGER_OBJ           = "INTEGER"
+	BOOLEAN_OBJ           = "BOOLEAN"
+	STRING_OBJ            = "STRING"
+	RETURN_VALUE_OBJ      = "RETURN_VALUE"
+	FUNCTION_OBJ          = "FUNCTION"
+	BUILTIN_OBJ           = "BUILTIN"
+	ARRAY_OBJ             = "ARRAY"
+	HASH_OBJ              = "HASH"
+	COMPILED_FUNCTION_OBJ = "COMPILED_FUNCTION_OBJ"
 )
 
 type HashKey struct {
@@ -115,6 +113,22 @@ func (f *Function) Inspect() string {
 	return out.String()
 }
 
+type CompiledFunction struct {
+	Instructions []code.Instruction
+	/**************************INICIO DEBUG************************/
+	StrByteCode string
+	/**************************FIN DEBUG***************************/
+}
+
+func (cf *CompiledFunction) Type() ObjectType { return COMPILED_FUNCTION_OBJ }
+func (cf *CompiledFunction) Inspect() string {
+	var out bytes.Buffer
+	out.WriteString(fmt.Sprintf("*********FUNCTION*********\n"))
+	out.WriteString(cf.StrByteCode)
+	out.WriteString(fmt.Sprintf("*********ENDFUNC*********\n"))
+	return out.String()
+}
+
 type String struct {
 	Value string
 }
@@ -155,13 +169,8 @@ func (ao *Array) Inspect() string {
 	return out.String()
 }
 
-type HashPair struct {
-	Key   Object
-	Value Object
-}
-
 type Hash struct {
-	Pairs map[HashKey]HashPair
+	Pairs map[string]Object
 }
 
 func (h *Hash) Type() ObjectType { return HASH_OBJ }
@@ -169,9 +178,8 @@ func (h *Hash) Inspect() string {
 	var out bytes.Buffer
 
 	pairs := []string{}
-	for _, pair := range h.Pairs {
-		pairs = append(pairs, fmt.Sprintf("%s: %s",
-			pair.Key.Inspect(), pair.Value.Inspect()))
+	for key, value := range h.Pairs {
+		pairs = append(pairs, fmt.Sprintf("%s: %s", key, value.Inspect()))
 	}
 
 	out.WriteString("{")

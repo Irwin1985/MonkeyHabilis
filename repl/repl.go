@@ -3,6 +3,7 @@ package repl
 import (
 	"MonkeyHabilis/compiler"
 	"MonkeyHabilis/lexer"
+	"MonkeyHabilis/object"
 	"MonkeyHabilis/parser"
 	"MonkeyHabilis/vm"
 	"bufio"
@@ -14,6 +15,11 @@ const PROMPT = ">> "
 
 func Start(in io.Reader, out io.Writer) {
 	scanner := bufio.NewScanner(in)
+
+	objectPool := []object.Object{}
+	globals := make([]object.Object, vm.GLOBAL_SIZE)
+
+	symbolTable := compiler.NewSymbolTable()
 
 	for {
 		fmt.Print(PROMPT)
@@ -32,13 +38,23 @@ func Start(in io.Reader, out io.Writer) {
 			continue
 		}
 
-		comp := compiler.New()
+		comp := compiler.NewWithState(symbolTable, objectPool)
 		err := comp.Compile(program)
 		if err != nil {
 			fmt.Fprintf(out, "Woops! Compilation failed:\n %s\n", err)
+			continue
 		}
 
-		machine := vm.New(comp.GetByteCode())
+		/**************************INICIO DEBUG************************/
+		strBytecode := comp.PrintInstructions(comp.GetInstructions())
+		fmt.Print(strBytecode)
+		/**************************FIN DEBUG***************************/
+
+		// Obtenemos el bytecode y mantenemos la lista de constantes
+		byteCode := comp.GetByteCode()
+		objectPool = byteCode.ObjectPool
+
+		machine := vm.NewWithGlobalsStore(byteCode, globals)
 		err = machine.Run()
 
 		if err != nil {
@@ -46,8 +62,8 @@ func Start(in io.Reader, out io.Writer) {
 			continue
 		}
 
-		stackTop := machine.StackTop()
-		io.WriteString(out, stackTop.Inspect())
+		lastPopped := machine.LastPoppedStackElem()
+		io.WriteString(out, lastPopped.Inspect())
 		io.WriteString(out, "\n")
 	}
 }

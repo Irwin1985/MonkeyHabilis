@@ -3,12 +3,12 @@ package main
 import (
 	"MonkeyHabilis/compiler"
 	"MonkeyHabilis/lexer"
+	"MonkeyHabilis/object"
 	"MonkeyHabilis/parser"
+	"MonkeyHabilis/repl"
 	"MonkeyHabilis/token"
 	"MonkeyHabilis/vm"
-	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/user"
 )
@@ -32,56 +32,27 @@ func testMyVersion() {
 	mode := "console"
 
 	if mode == "console" {
-		scanner := bufio.NewScanner(os.Stdin)
-		for {
-			fmt.Print(">> ")
-			scanned := scanner.Scan()
-			if !scanned {
-				return
-			}
-
-			line := scanner.Text()
-			l := lexer.New(line)
-			p := parser.New(l)
-
-			program := p.Program()
-			if len(p.Errors) != 0 {
-				fmt.Printf("errors: %v", p.Errors)
-				continue
-			}
-
-			comp := compiler.New()
-			err := comp.Compile(program)
-			if err != nil {
-				fmt.Fprintf(os.Stdout, "Woops! Compilation failed:\n %s\n", err)
-			}
-
-			machine := vm.New(comp.GetByteCode())
-			err = machine.Run()
-
-			if err != nil {
-				fmt.Fprintf(os.Stdout, "Woops! Executing bytecode failed:\n %s\n", err)
-				continue
-			}
-
-			stackTop := machine.LastPoppedStackElem()
-			io.WriteString(os.Stdout, stackTop.Inspect())
-			io.WriteString(os.Stdout, "\n")
-		}
+		repl.Start(os.Stdin, os.Stdout)
 	} else {
-		input := `if( 5 == 5 ) {"Correcto!"} else {"Que?, estas loco?"};`
+		input := `let a = fn() { 1; 2; 3; 4; 5; };`
+
 		l := lexer.New(input)
 		p := parser.New(l)
 		program := p.Program()
 
-		c := compiler.New()
+		objectPool := []object.Object{}                  // lista de constantes globales (tienes que sobrevivir a la REPL)
+		globals := make([]object.Object, vm.GLOBAL_SIZE) // lista de objetos globales de la máquina virtual
+		symbolTable := compiler.NewSymbolTable()         // tabla de símbolos global
+
+		c := compiler.NewWithState(symbolTable, objectPool)
 		c.Compile(program)
 
-		// DEBUG
-		strBytecode := c.DumpInstructions()
+		/**************************INICIO DEBUG************************/
+		strBytecode := c.PrintInstructions(c.GetInstructions())
 		fmt.Print(strBytecode)
+		/**************************FIN DEBUG***************************/
 
-		vm := vm.New(c.GetByteCode())
+		vm := vm.NewWithGlobalsStore(c.GetByteCode(), globals)
 		err := vm.Run()
 		if err != nil {
 			fmt.Printf("Woops! Executing bytecode failed:\n %s\n", err)

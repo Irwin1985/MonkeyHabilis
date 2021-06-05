@@ -307,29 +307,32 @@ func (p *Parser) primary() ast.Expression {
 
 // callExpression ::= functionCall | arrayCall | hashCall
 func (p *Parser) callExpression(callee ast.Expression) ast.Expression {
-	var callExpr = &ast.CallExprNode{
-		Callee: callee,
-	}
-
 	if p.curToken.Type == token.LPAREN {
+		var callExpr = &ast.CallExprNode{
+			Callee: callee,
+		}
+
 		p.advance(token.LPAREN)
 		if p.curToken.Type != token.RPAREN {
 			callExpr.Arguments = p.arguments()
 		}
 		p.advance(token.RPAREN)
+		return callExpr
+
 	} else if p.curToken.Type == token.LBRACKET {
+		var indexExpr = &ast.IndexExprNode{
+			Callee: callee,
+		}
+
 		p.advance(token.LBRACKET)
 		if p.curToken.Type != token.RBRACKET {
-			callExpr.Arguments = p.arguments()
-			if len(callExpr.Arguments) > 1 {
-				msg := fmt.Sprintf("Invalid subcript reference.\n")
-				p.Errors = append(p.Errors, msg)
-			}
+			indexExpr.Index = p.expression()
 		}
 		p.advance(token.RBRACKET)
-	}
 
-	return callExpr
+		return indexExpr
+	}
+	return nil
 }
 
 // functionLiteral ::= 'fn' '(' parameters ? ')'

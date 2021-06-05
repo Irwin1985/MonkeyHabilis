@@ -35,6 +35,7 @@ const (
 	WHILE
 	ARRAY
 	HASH
+	INDEX
 	CALL
 )
 
@@ -188,6 +189,24 @@ func (cn *CallExprNode) String() string {
 		out.WriteString(strings.Join(arguments, ","))
 	}
 	out.WriteString(")")
+	return out.String()
+}
+
+type IndexExprNode struct {
+	Callee Expression
+	Index  Expression
+}
+
+func (cn *IndexExprNode) expressionNode() {}
+func (cn *IndexExprNode) Type() Type      { return INDEX }
+func (cn *IndexExprNode) String() string {
+	var out bytes.Buffer
+	out.WriteString(cn.Callee.String())
+	out.WriteString("[")
+	if cn.Index != nil {
+		out.WriteString(cn.Index.String())
+	}
+	out.WriteString("]")
 	return out.String()
 }
 
