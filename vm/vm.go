@@ -11,7 +11,6 @@ var STACK_SIZE = 2048
 
 // estamos usando un int genérico por lo tanto este número es falso.
 var GLOBAL_SIZE = 65536
-var MAX_FRAMES = 1024
 
 var TRUE = &object.Boolean{Value: true}
 var FALSE = &object.Boolean{Value: false}
@@ -23,6 +22,7 @@ type VM struct {
 	sp          int             // este es el puntero de la pila que siempre apunta al último objeto
 	globals     []object.Object // array de variables globales
 	frames      []*Frame        // array de Frames
+	curFrame    *Frame
 	framesIndex int
 }
 
@@ -33,13 +33,14 @@ func New(bytecode *compiler.ByteCode) *VM {
 	mainFunction := &object.CompiledFunction{
 		Instructions: bytecode.Instructions,
 	}
+	mainClosure := &object.Closure{Fn: mainFunction}
 
 	// Creamos el Frame principal
-	mainFrame := NewFrame(mainFunction)
+	mainFrame := NewFrame(mainClosure, 0)
 	// Creamos el array de frames
-	frames := make([]*Frame, MAX_FRAMES)
+	frames := []*Frame{}
 	// Y le decimos que la posición 0 es el frame principal.
-	frames[0] = mainFrame
+	frames = append(frames, mainFrame)
 
 	vm := &VM{
 		objectPool:  bytecode.ObjectPool,
@@ -47,7 +48,8 @@ func New(bytecode *compiler.ByteCode) *VM {
 		sp:          0,
 		globals:     make([]object.Object, GLOBAL_SIZE),
 		frames:      frames,
-		framesIndex: 1,
+		curFrame:    mainFrame,
+		framesIndex: 0,
 	}
 
 	return vm
@@ -64,32 +66,32 @@ func NewWithGlobalsStore(bytecode *compiler.ByteCode, s []object.Object) *VM {
 // agrega un nuevo frame
 func (vm *VM) loadFrame(newFrame *Frame) {
 	// ampliamos el array de frames
-	vm.frames[vm.framesIndex] = newFrame
+	vm.frames = append(vm.frames, newFrame)
 	// incrementamos el contador de frames
 	vm.framesIndex += 1
+	// actualizamos el frame actual
+	vm.curFrame = vm.frames[vm.framesIndex]
 }
 
 // elimina el frame
 func (vm *VM) unloadFrame() *Frame {
 	// guardamos el frame actual
-	deletedFrame := vm.frames[vm.framesIndex]
+	deletedFrame := vm.curFrame
+	// truncamos el array de frames
+	vm.frames = vm.frames[:len(vm.frames)-1]
 	// y lo eliminamos de la lista
 	vm.framesIndex -= 1
-
+	// actualizamos el frame actual
+	vm.curFrame = vm.frames[vm.framesIndex]
 	return deletedFrame
-}
-
-// devuelve el frame actual
-func (vm *VM) curFrame() *Frame {
-	return vm.frames[vm.framesIndex-1]
 }
 
 // Comienza el ciclo Fetch-Decode-Execute
 func (vm *VM) Run() error {
-	for vm.curFrame().ip < len(vm.curFrame().cf.Instructions)-1 {
-		vm.curFrame().ip += 1
+	for vm.curFrame.ip < len(vm.curFrame.cl.Fn.Instructions)-1 {
+		vm.curFrame.ip += 1
 		// Obtener la instrucción a ejecutar
-		instruction := vm.curFrame().cf.Instructions[vm.curFrame().ip]
+		instruction := vm.curFrame.cl.Fn.Instructions[vm.curFrame.ip]
 
 		switch instruction.OpCode {
 		case code.OpConstant:
@@ -125,11 +127,11 @@ func (vm *VM) Run() error {
 			// TODO: validar el tipo de dato antes.
 			if !vm.pop().(*object.Boolean).Value {
 				// saltamos a donde nos indique OpJumpNotTrue
-				vm.curFrame().ip = instruction.Position - 1 // le resto 1 para que comience exactamente en el número correcto.
+				vm.curFrame.ip = instruction.Position - 1 // le resto 1 para que comience exactamente en el número correcto.
 			}
 		case code.OpJump:
 			// saltamos sin preguntar al índice
-			vm.curFrame().ip = instruction.Position - 1
+			vm.curFrame.ip = instruction.Position - 1
 
 		case code.OpPop:
 			vm.pop()
@@ -146,6 +148,23 @@ func (vm *VM) Run() error {
 			globalIndex := instruction.Position
 			// empujamos el objeto en la pila
 			err := vm.push(vm.globals[globalIndex])
+			if err != nil {
+				return err
+			}
+
+		case code.OpSetLocal:
+			// obtenemos el índice
+			localIndex := instruction.Position
+			frame := vm.curFrame
+			vm.stack[frame.basePointer+localIndex] = vm.pop()
+
+		case code.OpGetLocal:
+			// obtenemos el índice
+			localIndex := instruction.Position
+			frame := vm.curFrame
+
+			// enviamos el valor a la pila
+			err := vm.push(vm.stack[frame.basePointer+localIndex])
 			if err != nil {
 				return err
 			}
@@ -206,7 +225,7 @@ func (vm *VM) Run() error {
 				arrayObj := objCollection.(*object.Array)
 				index := int(objIndex.(*object.Integer).Value)
 
-				if index < 0 || index > len(arrayObj.Elements) {
+				if index < 0 || index >= len(arrayObj.Elements) {
 					return fmt.Errorf("index out of range")
 				}
 
@@ -239,7 +258,7 @@ func (vm *VM) Run() error {
 				stringObj := objCollection.(*object.String)
 				index := int(objIndex.(*object.Integer).Value)
 
-				if index < 0 || index > len(stringObj.Value) {
+				if index < 0 || index >= len(stringObj.Value) {
 					return fmt.Errorf("index out of range")
 				}
 				// nuevo string truncado
@@ -248,24 +267,86 @@ func (vm *VM) Run() error {
 			}
 
 		case code.OpCall:
-			peekObj := vm.peek()
-			callee, ok := peekObj.(*object.CompiledFunction)
-			if !ok {
-				return fmt.Errorf("calling non-function")
+			// obtenemos el número de argumentos
+			numArgs := instruction.Position
+
+			err := vm.executeCall(numArgs)
+			if err != nil {
+				return err
 			}
-			frame := NewFrame(callee)
-			vm.loadFrame(frame)
+
+			// obtenemos la función
+			//peekObj := vm.peek()
+			// ahora tenemos que restar el número de argumentos
+			// peekObj := vm.stack[vm.sp-1-numArgs]
+			// callee, ok := peekObj.(*object.CompiledFunction)
+			// if !ok {
+			// 	return fmt.Errorf("calling non-function")
+			// }
+			// creamos un frame para la función
+			//frame := NewFrame(callee, vm.sp) // pasamos el puntero de la pila
+			// cargamos el frame en la vm.
+			//vm.loadFrame(frame)
+			// creamos un espacio en la pila para
+			// almacenar las variables locales
+			//vm.sp = frame.basePointer + callee.NumLocals
 
 		case code.OpReturnValue:
 			returnValue := vm.pop() // obtiene el valor a retornar
 
-			vm.unloadFrame() // sube un frame
-			vm.pop()         // quita la función de la pila
+			frame := vm.unloadFrame() // abandona el frame actual
+			// restauramos el puntero de la pila para recuperar la región reservada por el frame.
+			vm.sp = frame.basePointer - 1 // -1 para que se coma también el frame ejecutado
+
+			//vm.pop() // quita la función de la pila
 
 			err := vm.push(returnValue) // sube el valor a retornar por el frame anterior
 			if err != nil {
 				return err
 			}
+
+		case code.OpReturn:
+			// salir del frame actual
+			frame := vm.unloadFrame()
+			vm.sp = frame.basePointer - 1 // para que se coma también el frame de la función ejecutada.
+
+			// eliminar el frame de la función con pop()
+			//vm.pop()
+
+			err := vm.push(NULL)
+			if err != nil {
+				return err
+			}
+
+		case code.OpGetBuiltin:
+			// obtenemos el índice del builtin
+			builtinIndex := instruction.Position
+			// obtenemos el builtin desde la lista de builtins
+			definition := object.Builtins[builtinIndex]
+
+			err := vm.push(definition.Builtin)
+			if err != nil {
+				return err
+			}
+
+		case code.OpClosure:
+			constIndex := instruction.Position
+			numFree := instruction.FreeSymbols
+
+			err := vm.pushClosure(constIndex, numFree)
+			if err != nil {
+				return err
+			}
+
+		case code.OpGetFree:
+			freeIndex := instruction.Position
+
+			currentClosure := vm.curFrame.cl
+			err := vm.push(currentClosure.Free[freeIndex])
+			if err != nil {
+				return err
+			}
+
 		}
 	}
 	return nil
@@ -279,6 +360,25 @@ func (vm *VM) push(obj object.Object) error {
 	vm.stack[vm.sp] = obj
 	vm.sp += 1 // incrementa el puntero
 	return nil
+}
+
+// Agrega un closure en la pila
+func (vm *VM) pushClosure(index int, numFree int) error {
+	constant := vm.objectPool[index]
+	function, ok := constant.(*object.CompiledFunction)
+	if !ok {
+		return fmt.Errorf("not a function: %+v", constant)
+	}
+
+	free := make([]object.Object, numFree)
+	for i := 0; i < numFree; i++ {
+		free[i] = vm.stack[vm.sp-numFree+i]
+	}
+	vm.sp = vm.sp - numFree
+
+	closure := &object.Closure{Fn: function, Free: free}
+
+	return vm.push(closure)
 }
 
 // Quita un elemento de la pila
@@ -300,9 +400,58 @@ func (vm *VM) LastPoppedStackElem() object.Object {
 	return vm.stack[vm.sp]
 }
 
-// Devuelve el último elemento sin removerlo de la pila
-func (vm *VM) peek() object.Object {
-	return vm.stack[vm.sp-1]
+func (vm *VM) callClosure(cl *object.Closure, numArgs int) error {
+	// comparar el número de parámetros y argumentos
+	if numArgs != cl.Fn.NumParameters {
+		return fmt.Errorf("wrong number of arguments: want=%d, got=%d", cl.Fn.NumParameters, numArgs)
+	}
+	// creamos el nuevo frame para la función
+	newFrame := NewFrame(cl, vm.sp-numArgs)
+	// cargamos el nuevo frame en la máquina virtual
+	vm.loadFrame(newFrame)
+	// creamos el "hueco" en la pila para las variables locales y argumentos
+	vm.sp = newFrame.basePointer + cl.Fn.NumLocals
+
+	return nil
+}
+
+// func (vm *VM) callFunction(funObj *object.CompiledFunction, numArgs int) error {
+// 	// comparar el número de parámetros y argumentos
+// 	if numArgs != funObj.NumParameters {
+// 		return fmt.Errorf("wrong number of arguments: want=%d, got=%d", funObj.NumParameters, numArgs)
+// 	}
+// 	// creamos el nuevo frame para la función
+// 	newFrame := NewFrame(funObj, vm.sp-numArgs)
+// 	// cargamos el nuevo frame en la máquina virtual
+// 	vm.loadFrame(newFrame)
+// 	// creamos el "hueco" en la pila para las variables locales y argumentos
+// 	vm.sp = newFrame.basePointer + funObj.NumLocals
+
+// 	return nil
+// }
+
+func (vm *VM) executeCall(numArgs int) error {
+	callee := vm.stack[vm.sp-1-numArgs]
+	switch callee := callee.(type) {
+	case *object.Closure:
+		return vm.callClosure(callee, numArgs)
+	case *object.Builtin:
+		return vm.callBuiltin(callee, numArgs)
+	default:
+		return fmt.Errorf("calling non-function and non-built-in")
+	}
+}
+
+func (vm *VM) callBuiltin(builtin *object.Builtin, numArgs int) error {
+	args := vm.stack[vm.sp-numArgs : vm.sp]
+	result := builtin.Fn(args...)
+	vm.sp = vm.sp - numArgs - 1 // eliminamos la región de los argumentos
+	if result != nil {
+		vm.push(result)
+	} else {
+		vm.push(NULL)
+	}
+	return nil
 }
 
 /*

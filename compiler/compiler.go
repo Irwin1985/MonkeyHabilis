@@ -36,9 +36,16 @@ func New() *Compiler {
 		instructions: []code.Instruction{},
 		ic:           0,
 	}
+	// creamos la tabla de símbolos
+	symbolTable := NewSymbolTable()
+	// definimos los built-ins
+	for i, builtin := range object.Builtins {
+		symbolTable.DefineBuiltin(i, builtin.Name)
+	}
+
 	comp := &Compiler{
 		objectPool:  []object.Object{},
-		symbolTable: NewSymbolTable(),
+		symbolTable: symbolTable,
 		frames:      []CompiledFrame{mainFrame},
 		frameIndex:  0,
 	}
@@ -55,6 +62,20 @@ func NewWithState(s *SymbolTable, objectPool []object.Object) *Compiler {
 	return compiler
 }
 
+// setSymbol
+func (c *Compiler) setSymbol(symbol Symbol) {
+	switch symbol.Scope {
+	case GlobalScope:
+		c.addInstruction(code.OpGetGlobal, symbol.Index, symbol.Name, 0)
+	case LocalScope:
+		c.addInstruction(code.OpGetLocal, symbol.Index, symbol.Name, 0)
+	case BuiltinScope:
+		c.addInstruction(code.OpGetBuiltin, symbol.Index, symbol.Name, 0)
+	case FreeScope:
+		c.addInstruction(code.OpGetFree, symbol.Index, symbol.Name, 0)
+	}
+}
+
 // Crea un nuevo ámbito de instrucciones
 func (c *Compiler) loadFrame() {
 	newFrame := CompiledFrame{
@@ -63,8 +84,16 @@ func (c *Compiler) loadFrame() {
 	}
 	c.frames = append(c.frames, newFrame)
 	c.frameIndex += 1
+
+	// Emparentar la tabla de símbolos actual
+	c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
+
 	// actualizamos el currentFrame
 	c.curFrame = &newFrame
+
+	//parentSymbolTable := c.symbolTable
+	//childSymbolTable := NewEnclosedSymbolTable(parentSymbolTable)
+	//c.symbolTable = childSymbolTable
 }
 
 // Sale del ámbito de instrucciones actual
@@ -76,8 +105,15 @@ func (c *Compiler) unloadFrame() CompiledFrame {
 	c.frames = c.frames[:len(c.frames)-1]
 	// eliminamos el frame del contador de frames
 	c.frameIndex -= 1
+
+	// desemparentar la tabla de símbolos
+	c.symbolTable = c.symbolTable.Outer
+
 	// actualizamos el currentFrame
 	c.curFrame = &c.frames[c.frameIndex]
+
+	//parentSymbolTable := c.symbolTable.Outer
+	//c.symbolTable = parentSymbolTable
 
 	return deletedFrame
 }
@@ -108,23 +144,34 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// Como una expresión se representa a sí misma
 		// tenemos que enviar un comando Pop para que se limpie la pila
-		c.addInstruction(code.OpPop, 0, "")
+		c.addInstruction(code.OpPop, 0, "", 0)
 
 	case *ast.LetStmtNode:
+		// el chiste es generar un símbolo con un índice único.
+		opCode := code.OpSetGlobal
+		symbol := c.symbolTable.Define(node.Name.Value)
+
 		err := c.Compile(node.Value)
 		if err != nil {
 			return err
 		}
-		// el chiste es generar un símbolo con un índice único.
-		symbol := c.symbolTable.Define(node.Name.Value)
-		c.addInstruction(code.OpSetGlobal, symbol.Index, node.Name.Value)
+
+		if symbol.Scope == LocalScope {
+			opCode = code.OpSetLocal
+		}
+		c.addInstruction(opCode, symbol.Index, node.Name.Value, 0)
 
 	case *ast.IdentifierNode:
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.Value)
 		}
-		c.addInstruction(code.OpGetGlobal, symbol.Index, node.Value)
+		c.setSymbol(symbol)
+		// opCode := code.OpGetGlobal
+		// if symbol.Scope == LocalScope {
+		// 	opCode = code.OpGetLocal
+		// }
+		// c.addInstruction(opCode, symbol.Index, node.Value, 0)
 
 	case *ast.Binary:
 		err := c.Compile(node.Left)
@@ -138,29 +185,29 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Emitimos la instrucción según el tipo de operador binario.
 		switch node.Op.Type {
 		case token.PLUS:
-			c.addInstruction(code.OpAdd, 0, "")
+			c.addInstruction(code.OpAdd, 0, "", 0)
 		case token.MINUS:
-			c.addInstruction(code.OpSub, 0, "")
+			c.addInstruction(code.OpSub, 0, "", 0)
 		case token.ASTERISK:
-			c.addInstruction(code.OpMul, 0, "")
+			c.addInstruction(code.OpMul, 0, "", 0)
 		case token.SLASH:
-			c.addInstruction(code.OpDiv, 0, "")
+			c.addInstruction(code.OpDiv, 0, "", 0)
 		case token.LT:
-			c.addInstruction(code.OpLess, 0, "")
+			c.addInstruction(code.OpLess, 0, "", 0)
 		case token.LT_EQ:
-			c.addInstruction(code.OpLessEq, 0, "")
+			c.addInstruction(code.OpLessEq, 0, "", 0)
 		case token.GT:
-			c.addInstruction(code.OpGreater, 0, "")
+			c.addInstruction(code.OpGreater, 0, "", 0)
 		case token.GT_EQ:
-			c.addInstruction(code.OpGreaterEq, 0, "")
+			c.addInstruction(code.OpGreaterEq, 0, "", 0)
 		case token.EQ:
-			c.addInstruction(code.OpEqual, 0, "")
+			c.addInstruction(code.OpEqual, 0, "", 0)
 		case token.NOT_EQ:
-			c.addInstruction(code.OpNotEq, 0, "")
+			c.addInstruction(code.OpNotEq, 0, "", 0)
 		case token.AND:
-			c.addInstruction(code.OpAnd, 0, "")
+			c.addInstruction(code.OpAnd, 0, "", 0)
 		case token.OR:
-			c.addInstruction(code.OpOr, 0, "")
+			c.addInstruction(code.OpOr, 0, "", 0)
 		default:
 			return fmt.Errorf("unknown operator %s", node.Op.Literal)
 		}
@@ -172,9 +219,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		switch node.Op.Type {
 		case token.MINUS:
-			c.addInstruction(code.OpNegInt, 0, "")
+			c.addInstruction(code.OpNegInt, 0, "", 0)
 		case token.BANG:
-			c.addInstruction(code.OpNegBool, 0, "")
+			c.addInstruction(code.OpNegBool, 0, "", 0)
 		default:
 			return fmt.Errorf("unknown operator for unary expression %s", node.Op.Literal)
 		}
@@ -185,27 +232,31 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// Guardamos el objeto en la pila de constantes
 		index := c.addConstant(intObj)
 		// este index es el que sirve para armar el bytecode.
-		c.addInstruction(code.OpConstant, index, fmt.Sprint(node.Value))
+		c.addInstruction(code.OpConstant, index, fmt.Sprint(node.Value), 0)
 
 	case *ast.StringNode:
 		stringObj := &object.String{Value: node.Value}
 		index := c.addConstant(stringObj)
-		c.addInstruction(code.OpConstant, index, fmt.Sprintf("\"%s\"", node.Value))
+		c.addInstruction(code.OpConstant, index, fmt.Sprintf("\"%s\"", node.Value), 0)
 
 	case *ast.BooleanNode:
 		opCode := code.OpFalse
 		if node.Value {
 			opCode = code.OpTrue
 		}
-		c.addInstruction(opCode, 0, "")
+		c.addInstruction(opCode, 0, "", 0)
 
 	case *ast.NullNode:
-		c.addInstruction(code.OpNull, 0, "")
+		c.addInstruction(code.OpNull, 0, "", 0)
 
 	case *ast.FunLiteralNode:
 		// entramos en un nuevo ámbito de instrucciones para la función
 		c.loadFrame()
 
+		// compilar los parámetros y tratarlos como local bindings
+		for _, parameter := range node.Parameters {
+			c.symbolTable.Define(parameter.Value)
+		}
 		err := c.Compile(node.Body)
 		if err != nil {
 			return err
@@ -222,26 +273,48 @@ func (c *Compiler) Compile(node ast.Node) error {
 		// entonces es una funcion que no retorna nada y eso es malo, para arreglarlo
 		// creamos a huevo una instrucción OpReturn que retorna null (la vm lo hará.)
 		if !c.lastInstructionIs(code.OpReturnValue) {
-			c.addInstruction(code.OpReturn, 0, "null")
+			c.addInstruction(code.OpReturn, 0, "null", 0)
 		}
+		// número de variables libres
+		freeSymbols := c.symbolTable.FreeSymbols
+		// Calculamos el número de variables creadas
+		// recordemos que al entrar en un nuevo symbolTable
+		// el número de definiciones empieza en cero.
+		numLocals := c.symbolTable.numDefinitions
 
 		// dejamos el ámbito y lo guardamos para la función
 		functionFrame := c.unloadFrame()
 
+		for _, s := range freeSymbols {
+			c.setSymbol(s)
+		}
+
 		// creamos el objeto compiledFunction
 		functionObj := &object.CompiledFunction{
-			Instructions: functionFrame.instructions,
-			StrByteCode:  c.PrintInstructions(functionFrame.instructions),
+			Instructions:  functionFrame.instructions,
+			NumLocals:     numLocals,
+			NumParameters: len(node.Parameters),
+			StrByteCode:   c.PrintInstructions(functionFrame.instructions),
 		}
 		index := c.addConstant(functionObj)
-		c.addInstruction(code.OpConstant, index, "FUNCTION")
+		//c.addInstruction(code.OpConstant, index, "FUNCTION", 0)
+		c.addInstruction(code.OpClosure, index, "CLOSURE", len(freeSymbols))
 
 	case *ast.CallExprNode:
 		err := c.Compile(node.Callee)
 		if err != nil {
 			return err
 		}
-		c.addInstruction(code.OpCall, 0, "")
+
+		// compilar los argumentos
+		for _, argument := range node.Arguments {
+			err := c.Compile(argument)
+			if err != nil {
+				return err
+			}
+		}
+
+		c.addInstruction(code.OpCall, len(node.Arguments), "", 0)
 
 	case *ast.ArrayLiteralNode:
 		// compilamos los elementos del array en modo inverso
@@ -253,7 +326,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// emitimos una instucción OpArray cuyo índice es el total de
 		// elementos que la vm deberá sacar de la pila.
-		c.addInstruction(code.OpArray, size, fmt.Sprintf("%d", size+1))
+		c.addInstruction(code.OpArray, size, fmt.Sprintf("%d", size+1), 0)
 
 	case *ast.HashLiteralNode:
 		// compilamos los elementos del diccionario.
@@ -272,7 +345,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// ahora emitimos la instrucción OpHash
 		size := len(node.Pairs) - 1
-		c.addInstruction(code.OpHash, size, fmt.Sprintf("%d", size+1))
+		c.addInstruction(code.OpHash, size, fmt.Sprintf("%d", size+1), 0)
 
 	case *ast.IndexExprNode:
 
@@ -288,7 +361,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 
-		c.addInstruction(code.OpAccess, 0, "")
+		c.addInstruction(code.OpAccess, 0, "", 0)
 
 	case *ast.IfExprNode:
 		err := c.Compile(node.Condition)
@@ -297,7 +370,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// emitimos la instrucción OpJumpNotTrue con un valor falso
 		// que luego actualizaremos con el real.
-		jumpNotTruePos := c.addInstruction(code.OpJumpNotTrue, 0, "")
+		jumpNotTruePos := c.addInstruction(code.OpJumpNotTrue, 0, "", 0)
 
 		// ahora compilamos la consecuencia
 		err = c.Compile(node.Consequence)
@@ -311,7 +384,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// emitimos el comando Jump para que salte
 		// una vez ejecutado el bloque del if.
-		jumpOpPos := c.addInstruction(code.OpJump, 0, "")
+		jumpOpPos := c.addInstruction(code.OpJump, 0, "", 0)
 
 		// actualizamos la posición del OpJumpNotTrue
 		//c.updateOpCodePosition(jumpNotTruePos, len(c.getInstructions()))
@@ -330,7 +403,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		} else {
 			// agregar un null por defecto
-			c.addInstruction(code.OpNull, 0, "")
+			c.addInstruction(code.OpNull, 0, "", 0)
 		}
 		// actualizamos la posición del OpJump
 		//c.updateOpCodePosition(jumpOpPos, len(c.getInstructions()))
@@ -342,7 +415,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 		// emitimos el opCode
-		c.addInstruction(code.OpReturnValue, 0, "")
+		c.addInstruction(code.OpReturnValue, 0, "", 0)
 	}
 	return nil
 }
@@ -357,16 +430,17 @@ func (c *Compiler) addConstant(obj object.Object) int {
 }
 
 // Agrega la instrucción al array de instructiones
-func (c *Compiler) addInstruction(opCode code.OpCode, index int, literal string) int {
+func (c *Compiler) addInstruction(opCode code.OpCode, index int, literal string, freeSymbols int) int {
 	// Obtenemos el índice actual de la instrucción
 	current_position := len(c.curFrame.instructions)
 
 	// Crea la instrucción y la agrega al array
 	instruction := code.Instruction{
-		OpCode:   opCode,
-		Position: index,
-		Literal:  literal,
-		Id:       c.curFrame.ic,
+		OpCode:      opCode,
+		Position:    index,
+		Literal:     literal,
+		Id:          c.curFrame.ic,
+		FreeSymbols: freeSymbols,
 	}
 	c.curFrame.instructions = append(c.curFrame.instructions, instruction)
 

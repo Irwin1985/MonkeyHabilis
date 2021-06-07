@@ -20,6 +20,9 @@ func Start(in io.Reader, out io.Writer) {
 	globals := make([]object.Object, vm.GLOBAL_SIZE)
 
 	symbolTable := compiler.NewSymbolTable()
+	for i, builtin := range object.Builtins {
+		symbolTable.DefineBuiltin(i, builtin.Name)
+	}
 
 	for {
 		fmt.Print(PROMPT)

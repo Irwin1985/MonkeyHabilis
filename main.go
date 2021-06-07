@@ -34,7 +34,12 @@ func testMyVersion() {
 	if mode == "console" {
 		repl.Start(os.Stdin, os.Stdout)
 	} else {
-		input := `let a = fn() { 1; 2; 3; 4; 5; };`
+		input := `let newAdder = fn(a, b) {
+					let c = a + b;
+					fn(d) { c + d };
+				  };
+				  let adder = newAdder(1, 2);
+				  adder(8);`
 
 		l := lexer.New(input)
 		p := parser.New(l)
@@ -44,21 +49,29 @@ func testMyVersion() {
 		globals := make([]object.Object, vm.GLOBAL_SIZE) // lista de objetos globales de la máquina virtual
 		symbolTable := compiler.NewSymbolTable()         // tabla de símbolos global
 
+		for i, builtin := range object.Builtins {
+			symbolTable.DefineBuiltin(i, builtin.Name)
+		}
+
 		c := compiler.NewWithState(symbolTable, objectPool)
-		c.Compile(program)
+		err := c.Compile(program)
 
-		/**************************INICIO DEBUG************************/
-		strBytecode := c.PrintInstructions(c.GetInstructions())
-		fmt.Print(strBytecode)
-		/**************************FIN DEBUG***************************/
-
-		vm := vm.NewWithGlobalsStore(c.GetByteCode(), globals)
-		err := vm.Run()
 		if err != nil {
-			fmt.Printf("Woops! Executing bytecode failed:\n %s\n", err)
+			fmt.Printf("Woops! Compilation failed:\n %s\n", err)
 		} else {
-			obj := vm.LastPoppedStackElem()
-			fmt.Print(obj.Inspect())
+			/**************************INICIO DEBUG************************/
+			strBytecode := c.PrintInstructions(c.GetInstructions())
+			fmt.Print(strBytecode)
+			/**************************FIN DEBUG***************************/
+
+			vm := vm.NewWithGlobalsStore(c.GetByteCode(), globals)
+			err := vm.Run()
+			if err != nil {
+				fmt.Printf("Woops! Executing bytecode failed:\n %s\n", err)
+			} else {
+				obj := vm.LastPoppedStackElem()
+				fmt.Print(obj.Inspect())
+			}
 		}
 	}
 }

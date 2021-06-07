@@ -25,6 +25,7 @@ const (
 	ARRAY_OBJ             = "ARRAY"
 	HASH_OBJ              = "HASH"
 	COMPILED_FUNCTION_OBJ = "COMPILED_FUNCTION_OBJ"
+	CLOSURE_OBJ           = "CLOSURE"
 )
 
 type HashKey struct {
@@ -114,7 +115,9 @@ func (f *Function) Inspect() string {
 }
 
 type CompiledFunction struct {
-	Instructions []code.Instruction
+	Instructions  []code.Instruction
+	NumLocals     int // número de variables locales
+	NumParameters int // número de parámetros que define.
 	/**************************INICIO DEBUG************************/
 	StrByteCode string
 	/**************************FIN DEBUG***************************/
@@ -127,6 +130,16 @@ func (cf *CompiledFunction) Inspect() string {
 	out.WriteString(cf.StrByteCode)
 	out.WriteString(fmt.Sprintf("*********ENDFUNC*********\n"))
 	return out.String()
+}
+
+type Closure struct {
+	Fn   *CompiledFunction
+	Free []Object
+}
+
+func (c *Closure) Type() ObjectType { return CLOSURE_OBJ }
+func (c *Closure) Inspect() string {
+	return c.Fn.StrByteCode
 }
 
 type String struct {

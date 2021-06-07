@@ -4,10 +4,11 @@ type OpCode byte
 
 // Este objeto hace de tupla para la máquina virtual.
 type Instruction struct {
-	OpCode   OpCode
-	Position int
-	Literal  string // el literal de las constantes
-	Id       int    // número de instrucción
+	OpCode      OpCode
+	Position    int
+	FreeSymbols int
+	Literal     string // el literal de las constantes
+	Id          int    // número de instrucción
 }
 
 const (
@@ -33,13 +34,18 @@ const (
 	OpJump
 	OpSetGlobal
 	OpGetGlobal
+	OpSetLocal
+	OpGetLocal
 	OpArray
 	OpHash
 	OpAccess
 	OpCall
 	OpReturnValue // retorna el objeto de la pila
 	OpReturn      // retorna desde la función actual
-	OpPop         // le indica a la vm que limpie la pila
+	OpGetBuiltin
+	OpClosure
+	OpGetFree
+	OpPop // le indica a la vm que limpie la pila
 )
 
 // nemónicos para emitir el log con las instrucciones
@@ -65,14 +71,19 @@ var nemmonics = map[OpCode]string{
 	OpOr:          "OR",
 	OpJumpNotTrue: "JUMP_NOT_TRUE",
 	OpJump:        "JUMP",
-	OpSetGlobal:   "STORE",
-	OpGetGlobal:   "FETCH",
+	OpSetGlobal:   "SET GLOBAL",
+	OpGetGlobal:   "GET GLOBAL",
+	OpSetLocal:    "SET LOCAL",
+	OpGetLocal:    "GET LOCAL",
 	OpArray:       "ARRAY OF",
 	OpHash:        "HASH OF",
 	OpAccess:      "ACCESS",
 	OpCall:        "CALL",
 	OpReturnValue: "RETURN_VALUE",
 	OpReturn:      "RETURN",
+	OpGetBuiltin:  "GET BUILTIN",
+	OpClosure:     "CLOSURE",
+	OpGetFree:     "GET FREE",
 	OpPop:         "POP",
 }
 

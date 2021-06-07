@@ -5,13 +5,16 @@ import (
 )
 
 type Frame struct {
-	cf *object.CompiledFunction
-	ip int
+	cl          *object.Closure
+	ip          int
+	basePointer int // guarda la posición del puntero
 }
 
-func NewFrame(compiledFunction *object.CompiledFunction) *Frame {
-	return &Frame{
-		cf: compiledFunction,
-		ip: -1, // -1 para que el siguiente loop de la vm lo lleve a cero.
+func NewFrame(cl *object.Closure, basePointer int) *Frame {
+	f := &Frame{
+		cl:          cl,
+		ip:          -1, // -1 para que el siguiente loop de la vm lo lleve a cero.
+		basePointer: basePointer,
 	}
+	return f
 }
